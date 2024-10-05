@@ -11,7 +11,8 @@ from homeassistant.components.media_player import (
 from homeassistant.components.media_player.const import (
     MediaPlayerEntityFeature, MediaType)
 from homeassistant.const import (
-    CONF_NAME, STATE_OFF, STATE_ON, STATE_UNKNOWN)
+    CONF_NAME, STATE_IDLE, STATE_OFF, STATE_ON, STATE_PAUSED, STATE_PLAYING, STATE_UNKNOWN
+)
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.restore_state import RestoreEntity
 from . import COMPONENT_ABS_DIR, Helper
@@ -128,6 +129,15 @@ class SmartIRMediaPlayer(MediaPlayerEntity, RestoreEntity):
         if 'mute' in self._commands and self._commands['mute'] is not None:
             self._support_flags = self._support_flags | MediaPlayerEntityFeature.VOLUME_MUTE
 
+        if 'play' in self._commands and self._commands['play'] is not None:
+            self._support_flags = self._support_flags | MediaPlayerEntityFeature.PLAY
+
+        if 'pause' in self._commands and self._commands['pause'] is not None:
+            self._support_flags = self._support_flags | MediaPlayerEntityFeature.PAUSE
+
+        if 'stop' in self._commands and self._commands['stop'] is not None:
+            self._support_flags = self._support_flags | MediaPlayerEntityFeature.STOP
+
         if 'sources' in self._commands and self._commands['sources'] is not None:
             self._support_flags = self._support_flags | MediaPlayerEntityFeature.SELECT_SOURCE | MediaPlayerEntityFeature.PLAY_MEDIA
 
@@ -147,7 +157,7 @@ class SmartIRMediaPlayer(MediaPlayerEntity, RestoreEntity):
         #Init the IR/RF controller
         self._controller = get_controller(
             self.hass,
-            self._supported_controller, 
+            self._supported_controller,
             self._commands_encoding,
             self._controller_data,
             self._delay)
@@ -236,6 +246,24 @@ class SmartIRMediaPlayer(MediaPlayerEntity, RestoreEntity):
         if self._power_sensor is None:
             self._state = STATE_ON
             self.async_write_ha_state()
+
+    async def async_media_play(self):
+        """Send play command."""
+        await self.send_command(self._commands['play'])
+        self._state = STATE_PLAYING
+        self.async_write_ha_state()
+
+    async def async_media_pause(self):
+        """Send play command."""
+        await self.send_command(self._commands['pause'])
+        self._state = STATE_PAUSED
+        self.async_write_ha_state()
+    
+    async def async_media_stop(self):
+        """Send play command."""
+        await self.send_command(self._commands['stop'])
+        self._state = STATE_IDLE
+        self.async_write_ha_state()
 
     async def async_media_previous_track(self):
         """Send previous track command."""
