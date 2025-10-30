@@ -9,9 +9,10 @@ import voluptuous as vol
 from homeassistant.components.media_player import (
     MediaPlayerEntity, PLATFORM_SCHEMA)
 from homeassistant.components.media_player.const import (
-    MediaPlayerEntityFeature, MediaType)
+    MediaPlayerEntityFeature, MediaPlayerState, MediaType)
 from homeassistant.const import (
-    CONF_NAME, STATE_OFF, STATE_ON, STATE_UNKNOWN)
+    CONF_NAME
+)
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.restore_state import RestoreEntity
 from . import COMPONENT_ABS_DIR, Helper
@@ -101,7 +102,7 @@ class SmartIRMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self._commands_encoding = device_data['commandsEncoding']
         self._commands = device_data['commands']
 
-        self._state = STATE_OFF
+        self._state = MediaPlayerState.OFF
         self._sources_list = []
         self._source = None
         self._support_flags = 0
@@ -128,6 +129,15 @@ class SmartIRMediaPlayer(MediaPlayerEntity, RestoreEntity):
         if 'mute' in self._commands and self._commands['mute'] is not None:
             self._support_flags = self._support_flags | MediaPlayerEntityFeature.VOLUME_MUTE
 
+        if 'play' in self._commands and self._commands['play'] is not None:
+            self._support_flags = self._support_flags | MediaPlayerEntityFeature.PLAY
+
+        if 'pause' in self._commands and self._commands['pause'] is not None:
+            self._support_flags = self._support_flags | MediaPlayerEntityFeature.PAUSE
+
+        if 'stop' in self._commands and self._commands['stop'] is not None:
+            self._support_flags = self._support_flags | MediaPlayerEntityFeature.STOP
+
         if 'sources' in self._commands and self._commands['sources'] is not None:
             self._support_flags = self._support_flags | MediaPlayerEntityFeature.SELECT_SOURCE | MediaPlayerEntityFeature.PLAY_MEDIA
 
@@ -147,7 +157,7 @@ class SmartIRMediaPlayer(MediaPlayerEntity, RestoreEntity):
         #Init the IR/RF controller
         self._controller = get_controller(
             self.hass,
-            self._supported_controller, 
+            self._supported_controller,
             self._commands_encoding,
             self._controller_data,
             self._delay)
@@ -194,6 +204,8 @@ class SmartIRMediaPlayer(MediaPlayerEntity, RestoreEntity):
     @property
     def media_content_type(self):
         """Content type of current playing media."""
+        if self._device_class == "speaker":
+            return MediaType.MUSIC
         return MediaType.CHANNEL
 
     @property
@@ -203,6 +215,11 @@ class SmartIRMediaPlayer(MediaPlayerEntity, RestoreEntity):
     @property
     def source(self):
         return self._source
+
+    @property
+    def volume_level(self):
+        """Volume level of the media player (0..1). Return None for step-only volume control."""
+        return None
 
     @property
     def supported_features(self):
@@ -225,17 +242,39 @@ class SmartIRMediaPlayer(MediaPlayerEntity, RestoreEntity):
         await self.send_command(self._commands['off'])
         
         if self._power_sensor is None:
-            self._state = STATE_OFF
+            self._state = MediaPlayerState.OFF
             self._source = None
             self.async_write_ha_state()
 
     async def async_turn_on(self):
-        """Turn the media player off."""
+        """Turn the media player on."""
         await self.send_command(self._commands['on'])
 
         if self._power_sensor is None:
-            self._state = STATE_ON
+            self._state = MediaPlayerState.IDLE
             self.async_write_ha_state()
+
+    async def async_media_play(self):
+        """Send play command."""
+        await self.send_command(self._commands['play'])
+        self._state = MediaPlayerState.PLAYING
+        self.async_write_ha_state()
+
+    async def async_media_pause(self):
+        """Send pause command."""
+        await self.send_command(self._commands['pause'])
+        # Toggle state for IR remotes with pause/play toggle buttons
+        if self._state == MediaPlayerState.PLAYING:
+            self._state = MediaPlayerState.PAUSED
+        else:
+            self._state = MediaPlayerState.PLAYING
+        self.async_write_ha_state()
+    
+    async def async_media_stop(self):
+        """Send play command."""
+        await self.send_command(self._commands['stop'])
+        self._state = MediaPlayerState.IDLE
+        self.async_write_ha_state()
 
     async def async_media_previous_track(self):
         """Send previous track command."""
@@ -270,10 +309,10 @@ class SmartIRMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     async def async_play_media(self, media_type, media_id, **kwargs):
         """Support channel change through play_media service."""
-        if self._state == STATE_OFF:
+        if self._state == MediaPlayerState.OFF:
             await self.async_turn_on()
 
-        if media_type != MediaType.CHANNEL:
+        if media_type != MediaType.CHANNEL and media_type != MediaType.MUSIC :
             _LOGGER.error("invalid media type")
             return
         if not media_id.isdigit():
@@ -299,8 +338,10 @@ class SmartIRMediaPlayer(MediaPlayerEntity, RestoreEntity):
         power_state = self.hass.states.get(self._power_sensor)
 
         if power_state:
-            if power_state.state == STATE_OFF:
-                self._state = STATE_OFF
+            if power_state.state == MediaPlayerState.OFF:
+                self._state = MediaPlayerState.OFF
                 self._source = None
-            elif power_state.state == STATE_ON:
-                self._state = STATE_ON
+            elif power_state.state == MediaPlayerState.ON:
+                # Preserve playback state if we're already playing/paused
+                if self._state == MediaPlayerState.OFF:
+                    self._state = MediaPlayerState.IDLE
